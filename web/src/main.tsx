@@ -2265,7 +2265,6 @@ function Landing() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-
 // [13] LOGIN
 // ═══════════════════════════════════════════════════════════════════
 const DEMO_CODE = "123456";
@@ -2603,7 +2602,6 @@ function Onboarding({ onDone }: { onDone: (name: string, city: string) => void }
 const NAV = [
   { to: "/", label: "Home", Icon: HomeIcon },
   { to: "/inbox", label: "Inbox", Icon: InboxIcon, badgeKey: "inbox" as const },
-  { to: "/money", label: "Money", Icon: IndianRupee },
   { to: "/invoices", label: "Invoices", Icon: Receipt },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/tasks", label: "Work", Icon: CheckSquare },
