@@ -1,0 +1,56 @@
+services:
+  # ── Rust API ─────────────────────────────────────────────────────
+  - type: web
+    name: bizos-api
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    rootDir: api
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false                  # paste your Neon URL in Render dashboard
+      - key: FIREBASE_PROJECT_ID
+        value: bizos-66734
+      - key: TENANT_SALT
+        generateValue: true
+      - key: DEMO_MODE
+        value: "true"
+      - key: PORT
+        value: "8080"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: AI_BASE_URL
+        fromService:
+          type: web
+          name: bizos-ai
+          property: host
+
+  # ── Python AI ────────────────────────────────────────────────────
+  - type: web
+    name: bizos-ai
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    rootDir: ai
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 90
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
