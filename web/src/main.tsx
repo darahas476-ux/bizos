@@ -216,13 +216,13 @@ try {
 }
 
 export const signInGoogle = async () => {
-  if (!auth) { enableDemo(); window.location.href = "/"; return; }
+  if (!auth) { enableDemo(); window.location.href = "/bizos/"; return; }
   return signInWithPopup(auth, new GoogleAuthProvider());
 };
 export const logOut = () => {
   disableDemo();
   if (auth) signOut(auth);
-  window.location.href = "/login";
+  window.location.href = "/bizos/";
 };
 
 export const AI_URL = import.meta.env.VITE_AI_URL || "http://localhost:5001";
@@ -2298,9 +2298,9 @@ function Login() {
   const verifyMfa = () => {
     if (mfaCode.replace(/\D/g, "").length < 6) { setError("Enter the 6-digit MFA code"); return; }
     if (mfaCode !== DEMO_CODE) { setError(`Demo code is ${DEMO_CODE}`); return; }
-    setError(null); enableDemo(); window.location.href = "/";
+    setError(null); enableDemo(); window.location.href = "/bizos/";
   };
-  const demoLogin = () => { enableDemo(); window.location.href = "/"; };
+  const demoLogin = () => { enableDemo(); window.location.href = "/bizos/"; };
 
   const wrap = {
     initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -8 },
@@ -7663,7 +7663,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
               <button onClick={() => window.location.reload()}
                 className="text-sm px-4 py-2 rounded-lg font-medium text-white"
                 style={{ background: T.primary }}>Reload</button>
-              <button onClick={() => { window.location.href = "/"; }}
+              <button onClick={() => { window.location.href = "/bizos/"; }}
                 className="text-sm px-4 py-2 rounded-lg border font-medium"
                 style={{ borderColor: T.border }}>Go home</button>
             </div>
@@ -8153,7 +8153,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/landing" element={<Landing />} />
-            <Route path="/onboarding" element={<Onboarding onDone={() => { enableDemo(); window.location.href = "/"; }} />} />
+            <Route path="/onboarding" element={<Onboarding onDone={() => { enableDemo(); window.location.href = "/bizos/"; }} />} />
             <Route path="/*" element={<RequireAuth><Authed /></RequireAuth>} />
           </Routes>
           <Toaster position="bottom-right"
