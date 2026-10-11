@@ -2265,6 +2265,963 @@ function Landing() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// [12] LANDING — v6 inline (canvas network + proof + interactive)
+// ═══════════════════════════════════════════════════════════════════
+
+function ScrollBar() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
+  return (
+    <motion.div aria-hidden
+      className="fixed top-0 left-0 right-0 h-[3px] origin-left z-50 pointer-events-none"
+      style={{ scaleX, background: `linear-gradient(90deg, ${T.primary}, ${T.accent})` }} />
+  );
+}
+
+function Magnetic({ children, onClick, className = "", style, strength = 0.28, calm }: {
+  children: ReactNode; onClick?: () => void; className?: string;
+  style?: MotionStyle; strength?: number; calm: boolean;
+}) {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const sx = useSpring(x, { stiffness: 220, damping: 16, mass: 0.5 });
+  const sy = useSpring(y, { stiffness: 220, damping: 16, mass: 0.5 });
+  const k = calm ? 0 : strength;
+  return (
+    <motion.button type="button" onClick={onClick}
+      onPointerMove={(e) => {
+        if (!k) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        x.set((e.clientX - (r.left + r.width / 2)) * k);
+        y.set((e.clientY - (r.top + r.height / 2)) * k);
+      }}
+      onPointerLeave={() => { x.set(0); y.set(0); }}
+      whileTap={{ scale: 0.97 }}
+      className={`group relative overflow-hidden ${className}`}
+      style={{ ...style, x: sx, y: sy }}>
+      <span aria-hidden
+        className="pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700"
+        style={{ background: "linear-gradient(100deg, transparent, rgba(255,255,255,0.55), transparent)" }} />
+      <span className="relative inline-flex items-center gap-4">{children}</span>
+    </motion.button>
+  );
+}
+
+function CountUp({ to, prefix = "", suffix = "", calm }: {
+  to: number; prefix?: string; suffix?: string; calm: boolean;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-60px" });
+  const [val, setVal] = useState<number>(calm ? to : 0);
+  useEffect(() => {
+    if (calm) { setVal(to); return; }
+    if (!inView) return;
+    let raf = 0;
+    const start = performance.now();
+    const dur = 1400;
+    const tick = (now: number) => {
+      const p = Math.min((now - start) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setVal(Math.round(to * eased));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [inView, calm, to]);
+  return <span ref={ref}>{prefix}{val.toLocaleString("en-IN")}{suffix}</span>;
+}
+
+function SpotlightCard({ children, className = "", style, glow = "rgba(23,112,106,0.14)", delay }: {
+  children: ReactNode; className?: string; style?: CSSProperties; glow?: string; delay?: number;
+}) {
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [on, setOn] = useState(false);
+  const reveal = delay !== undefined
+    ? { initial: { opacity: 0, y: 20 }, whileInView: { opacity: 1, y: 0 }, viewport: { once: true }, transition: { delay } }
+    : {};
+  return (
+    <motion.div {...reveal} whileHover={{ y: -4 }}
+      onPointerMove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        setPos({ x: e.clientX - r.left, y: e.clientY - r.top });
+      }}
+      onPointerEnter={() => setOn(true)}
+      onPointerLeave={() => setOn(false)}
+      className={`relative overflow-hidden ${className}`}
+      style={style}>
+      {children}
+      <div aria-hidden className="absolute inset-0 pointer-events-none transition-opacity duration-300"
+        style={{
+          opacity: on ? 1 : 0,
+          background: `radial-gradient(260px circle at ${pos.x}px ${pos.y}px, ${glow}, transparent 70%)`,
+        }} />
+    </motion.div>
+  );
+}
+
+function HeroBackdrop({ calm, tone = "paper" }: { calm: boolean; tone?: "paper" | "dark" }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const canvas = canvasRef.current;
+    if (!wrap || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    type Dot = { x: number; y: number; vx: number; vy: number; r: number };
+    type Pulse = { a: number; b: number; t: number; speed: number };
+    type Ripple = { x: number; y: number; t: number };
+    const pal = tone === "dark"
+      ? { dot: "255,255,255", dotA: 0.55, link: "255,255,255", linkA: 0.17, amber: "242,163,58" }
+      : { dot: "23,112,106", dotA: 0.5, link: "23,112,106", linkA: 0.2, amber: "242,163,58" };
+    const LINK = 130, LINK2 = LINK * LINK, MOUSE_R = 170, MOUSE2 = MOUSE_R * MOUSE_R;
+    const REPEL_R = 110, REPEL2 = REPEL_R * REPEL_R;
+    let w = 0, h = 0, raf = 0, last = 0, spawnAcc = 0;
+    let dots: Dot[] = [];
+    const pulses: Pulse[] = [];
+    const ripples: Ripple[] = [];
+    const mouse = { x: -9999, y: -9999 };
+    const draw = () => {
+      ctx.clearRect(0, 0, w, h); ctx.lineWidth = 1;
+      for (let i = 0; i < dots.length; i++) {
+        const a = dots[i];
+        for (let j = i + 1; j < dots.length; j++) {
+          const b = dots[j];
+          const dx = a.x - b.x, dy = a.y - b.y, d2 = dx*dx + dy*dy;
+          if (d2 < LINK2) {
+            const al = (1 - Math.sqrt(d2) / LINK) * pal.linkA;
+            ctx.strokeStyle = `rgba(${pal.link},${al.toFixed(3)})`;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
+        }
+        const mdx = a.x - mouse.x, mdy = a.y - mouse.y, m2 = mdx*mdx + mdy*mdy;
+        if (m2 < MOUSE2) {
+          const al = (1 - Math.sqrt(m2) / MOUSE_R) * 0.55;
+          ctx.strokeStyle = `rgba(${pal.amber},${al.toFixed(3)})`;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
+        }
+      }
+      ctx.fillStyle = `rgba(${pal.dot},${pal.dotA})`;
+      for (const d of dots) { ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2); ctx.fill(); }
+      for (const p of pulses) {
+        const a = dots[p.a], b = dots[p.b]; if (!a || !b) continue;
+        const x = a.x + (b.x - a.x) * p.t, y = a.y + (b.y - a.y) * p.t;
+        ctx.fillStyle = `rgba(${pal.amber},0.22)`; ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = `rgba(${pal.amber},1)`; ctx.beginPath(); ctx.arc(x, y, 2.8, 0, Math.PI*2); ctx.fill();
+      }
+      for (const r of ripples) {
+        ctx.strokeStyle = `rgba(${pal.amber},${((1 - r.t) * 0.55).toFixed(3)})`;
+        ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(r.x, r.y, 4 + r.t * 34, 0, Math.PI*2); ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+    };
+    const step = (dt: number) => {
+      if (dots.length === 0) return;
+      const k = dt * 60;
+      for (const d of dots) {
+        d.x += d.vx * k; d.y += d.vy * k;
+        if (d.x < -10) d.x = w + 10; else if (d.x > w + 10) d.x = -10;
+        if (d.y < -10) d.y = h + 10; else if (d.y > h + 10) d.y = -10;
+        const dx = d.x - mouse.x, dy = d.y - mouse.y, dist2 = dx*dx + dy*dy;
+        if (dist2 < REPEL2 && dist2 > 0.01) {
+          const dist = Math.sqrt(dist2);
+          const f = (1 - dist / REPEL_R) * 0.6 * k;
+          d.x += (dx / dist) * f; d.y += (dy / dist) * f;
+        }
+      }
+      spawnAcc += dt;
+      if (spawnAcc > 0.4 && pulses.length < 9) {
+        spawnAcc = 0;
+        const ai = Math.floor(Math.random() * dots.length);
+        const a = dots[ai]; const near: number[] = [];
+        for (let j = 0; j < dots.length; j++) {
+          if (j === ai) continue;
+          const dx = a.x - dots[j].x, dy = a.y - dots[j].y;
+          if (dx*dx + dy*dy < LINK2) near.push(j);
+        }
+        if (near.length > 0) pulses.push({ a: ai, b: near[Math.floor(Math.random()*near.length)], t: 0, speed: 0.9 + Math.random()*0.7 });
+      }
+      for (let p = pulses.length - 1; p >= 0; p--) {
+        const pu = pulses[p]; pu.t += dt * pu.speed;
+        if (pu.t >= 1) { const tb = dots[pu.b]; if (tb) ripples.push({ x: tb.x, y: tb.y, t: 0 }); pulses.splice(p, 1); }
+      }
+      for (let r = ripples.length - 1; r >= 0; r--) {
+        ripples[r].t += dt * 1.2; if (ripples[r].t >= 1) ripples.splice(r, 1);
+      }
+    };
+    const resize = () => {
+      const rect = wrap.getBoundingClientRect(); w = rect.width; h = rect.height;
+      if (w === 0 || h === 0) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
+      canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const count = Math.max(24, Math.min(84, Math.floor((w * h) / 15000)));
+      dots = Array.from({ length: count }, () => ({
+        x: Math.random()*w, y: Math.random()*h,
+        vx: (Math.random()-0.5)*0.25, vy: (Math.random()-0.5)*0.25,
+        r: 1.2 + Math.random()*1.6,
+      }));
+      pulses.length = 0; ripples.length = 0; draw();
+    };
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      const dt = Math.min((now - last) / 1000, 0.05); last = now; step(dt); draw();
+    };
+    const start = () => { if (calm || raf) return; last = performance.now(); raf = requestAnimationFrame(loop); };
+    const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+    const onMove = (e: PointerEvent) => {
+      const r = wrap.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      if (x < 0 || y < 0 || x > r.width || y > r.height) { mouse.x = -9999; mouse.y = -9999; }
+      else { mouse.x = x; mouse.y = y; }
+    };
+    const onDown = (e: PointerEvent) => {
+      if (calm) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("a,button")) return;
+      const r = wrap.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      if (x >= 0 && y >= 0 && x <= r.width && y <= r.height) ripples.push({ x, y, t: 0 });
+    };
+    const ro = new ResizeObserver(resize); ro.observe(wrap);
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) start(); else stop();
+    }); io.observe(wrap);
+    if (!calm) {
+      window.addEventListener("pointermove", onMove, { passive: true });
+      window.addEventListener("pointerdown", onDown, { passive: true });
+    }
+    resize();
+    return () => {
+      stop(); ro.disconnect(); io.disconnect();
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerdown", onDown);
+    };
+  }, [calm, tone]);
+  return (
+    <div ref={wrapRef} aria-hidden className="absolute inset-0 pointer-events-none"
+      style={tone === "paper" ? {
+        maskImage: "linear-gradient(180deg, #000 0%, #000 65%, transparent 100%)",
+        WebkitMaskImage: "linear-gradient(180deg, #000 0%, #000 65%, transparent 100%)",
+      } : undefined}>
+      <canvas ref={canvasRef} className="block" />
+    </div>
+  );
+}
+
+type LPToastTone = "good" | "primary" | "accent";
+type LPToastItem = { Icon: LucideIcon; title: string; sub: string; tone: LPToastTone };
+
+const TOASTS_LEFT: LPToastItem[] = [
+  { Icon: IndianRupee, title: "Payment received", sub: "₹2.85L · Zenith Tech", tone: "good" },
+  { Icon: Send, title: "Reminder sent", sub: "Sharma Traders · INV-104", tone: "primary" },
+  { Icon: Receipt, title: "Invoice logged", sub: "INV-107 · ₹1,20,000", tone: "accent" },
+];
+const TOASTS_RIGHT: LPToastItem[] = [
+  { Icon: ShieldCheck, title: "Action verified", sub: "Hash matched · 94 ms", tone: "good" },
+  { Icon: Calendar, title: "GSTR-3B in 3 days", sub: "Reminder set · 7:00 AM", tone: "accent" },
+  { Icon: BellRing, title: "Cash-flow alert", sub: "Low balance in 12 days", tone: "primary" },
+];
+
+function LiveToast({ items, startDelay, calm, className }: {
+  items: LPToastItem[]; startDelay: number; calm: boolean; className: string;
+}) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (calm) return;
+    let iv: number | undefined;
+    const t = window.setTimeout(() => {
+      setI((v) => (v + 1) % items.length);
+      iv = window.setInterval(() => setI((v) => (v + 1) % items.length), 3800);
+    }, startDelay);
+    return () => { window.clearTimeout(t); if (iv !== undefined) window.clearInterval(iv); };
+  }, [calm, items.length, startDelay]);
+  const item = items[i];
+  const tones: Record<LPToastTone, { bg: string; fg: string }> = {
+    good: { bg: T.goodSoft, fg: T.good },
+    primary: { bg: T.primarySoft, fg: T.primary },
+    accent: { bg: "rgba(242,163,58,0.22)", fg: "#B8741A" },
+  };
+  const tn = tones[item.tone];
+  return (
+    <div className={`hidden xl:block absolute w-[220px] ${className}`} aria-hidden>
+      <AnimatePresence mode="wait">
+        <motion.div key={i}
+          initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -14, scale: 0.97 }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="flex items-center gap-3 rounded-2xl px-3.5 py-3 backdrop-blur-md"
+          style={{
+            background: "rgba(255,255,255,0.82)",
+            border: `1px solid ${T.border}`,
+            boxShadow: "0 18px 40px -18px rgba(16,24,40,0.28)",
+          }}>
+          <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: tn.bg }}>
+            <item.Icon size={16} strokeWidth={2.2} style={{ color: tn.fg }} />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold truncate" style={{ color: T.ink }}>{item.title}</span>
+            <span className="block text-[11px] truncate" style={{ color: T.muted }}>{item.sub}</span>
+          </span>
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+type LPHeroCard = { key: string; featured?: boolean; body: ReactNode };
+
+const HERO_CARDS: LPHeroCard[] = [
+  { key: "overdue", body: (
+    <div className="p-3.5 h-full flex flex-col">
+      <div className="text-[10px] mb-1" style={{ color: T.muted }}>Overdue</div>
+      <div className="text-2xl leading-none tabular-nums" style={{ color: T.ink, fontWeight: 700 }}>₹12.6L</div>
+      <div className="text-[10px] mt-1 mb-3" style={{ color: T.critical }}>5 invoices</div>
+      {[["Sharma Traders", "35d"], ["Zenith Tech", "28d"], ["Patel Precision", "22d"]].map(([n, d]) => (
+        <div key={n} className="flex justify-between text-[10px] py-1.5 border-t" style={{ borderColor: T.border, color: T.ink }}>
+          <span className="truncate pr-2">{n}</span><span style={{ color: T.muted }}>{d}</span>
+        </div>
+      ))}
+    </div>
+  )},
+  { key: "snap", body: (
+    <div className="h-full flex flex-col" style={{ background: `linear-gradient(160deg, ${T.accent}, #F7C77A)` }}>
+      <div className="flex-1 flex items-center justify-center">
+        <Camera size={40} color={T.ink} strokeWidth={1.6} />
+      </div>
+      <div className="m-2 rounded-xl bg-white/90 px-3 py-2">
+        <div className="text-[9px]" style={{ color: T.muted }}>Invoice read</div>
+        <div className="flex justify-between text-[11px] font-semibold tabular-nums" style={{ color: T.ink }}>
+          <span>INV-107</span><span>₹1,20,000</span>
+        </div>
+      </div>
+    </div>
+  )},
+  { key: "cash", body: (
+    <div className="p-3.5 h-full flex flex-col">
+      <div className="text-[10px]" style={{ color: T.muted }}>Cash flow · next 30d</div>
+      <div className="text-xl mt-1 tabular-nums" style={{ color: T.ink, fontWeight: 700 }}>+₹3.4L</div>
+      <svg viewBox="0 0 120 60" className="mt-auto w-full">
+        <defs>
+          <linearGradient id="cf" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor={T.primary} stopOpacity="0.35" />
+            <stop offset="1" stopColor={T.primary} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d="M0 48 L20 40 L40 44 L60 26 L80 30 L100 12 L120 8 L120 60 L0 60Z" fill="url(#cf)" />
+        <path d="M0 48 L20 40 L40 44 L60 26 L80 30 L100 12 L120 8" fill="none" stroke={T.primary} strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    </div>
+  )},
+  { key: "chat", featured: true, body: (
+    <div className="h-full p-3.5 flex flex-col justify-between" style={{ background: WA.dark }}>
+      <div className="flex items-center gap-2">
+        <div className="w-6 h-6 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style={{ background: WA.green }}>BD</div>
+        <div className="text-[11px] text-white font-medium">BizOS Bot</div>
+        <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ background: WA.green }} />
+      </div>
+      <div className="space-y-1.5">
+        <div className="ml-auto max-w-[85%] rounded-xl px-2.5 py-1.5 text-[10px]" style={{ background: WA.bubbleOut, color: WA.text }}>who owes me money?</div>
+        <div className="max-w-[92%] rounded-xl px-2.5 py-1.5 text-[10px]" style={{ background: WA.bubbleIn, color: WA.text }}>5 invoices · ₹12.6L. Want me to send reminders?</div>
+      </div>
+    </div>
+  )},
+  { key: "gst", body: (
+    <div className="p-3.5 h-full flex flex-col" style={{ background: T.ink }}>
+      <div className="text-[10px] text-white/60">Compliance</div>
+      <div className="text-lg text-white mt-1 leading-tight" style={{ fontWeight: 700 }}>GSTR-3B due in 3 days</div>
+      <div className="mt-auto flex items-center gap-2 text-[10px]" style={{ color: T.accent }}>
+        <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: T.accent }} />
+        Reminder set · 7:00 AM
+      </div>
+    </div>
+  )},
+  { key: "tasks", body: (
+    <div className="p-3.5 h-full">
+      <div className="text-[10px] mb-2" style={{ color: T.muted }}>Open tasks · 8</div>
+      {["Send GST data to CA", "Follow up Zenith", "Pay vendor"].map((t, i) => (
+        <div key={t} className="flex items-center gap-2 text-[10px] py-1.5" style={{ color: T.ink }}>
+          <span className="w-3 h-3 rounded border flex items-center justify-center"
+            style={{ borderColor: T.primary, background: i === 0 ? T.primary : "transparent" }}>
+            {i === 0 && <Check size={7} color="#fff" strokeWidth={3} />}
+          </span>
+          <span className={i === 0 ? "line-through opacity-50" : ""}>{t}</span>
+        </div>
+      ))}
+    </div>
+  )},
+];
+
+function LPHeroCard({ c, i, mid, sx, sy, calm }: {
+  c: LPHeroCard; i: number; mid: number;
+  sx: MotionValue<number>; sy: MotionValue<number>; calm: boolean;
+}) {
+  const off = i - mid;
+  const rotY = -off * 13;
+  const lift = Math.abs(off) * 14;
+  const featured = !!c.featured;
+  const k = featured ? 1.5 : 0.6 + Math.abs(off) * 0.28;
+  const px = useTransform(sx, [0, 1], [-14 * k, 14 * k]);
+  const py = useTransform(sy, [0, 1], [-8 * k, 8 * k]);
+  return (
+    <div style={{
+      transform: `translateY(${lift}px) rotateY(${rotY}deg) scale(${featured ? 1.12 : 1 - Math.abs(off) * 0.04})`,
+      transformStyle: "preserve-3d",
+      zIndex: featured ? 10 : 5 - Math.round(Math.abs(off)),
+    }}>
+      <motion.div style={calm ? undefined : { x: px, y: py }}>
+        <motion.div
+          initial={{ opacity: 0, y: 50 }}
+          animate={calm ? { opacity: 1, y: 0 } : { opacity: 1, y: [0, -8, 0] }}
+          transition={calm ? { duration: 0.5 } : {
+            opacity: { duration: 0.6, delay: 0.7 + i * 0.08 },
+            y: { duration: 5 + (i % 3), repeat: Infinity, ease: "easeInOut", delay: i * 0.4 },
+          }}
+          whileHover={{ y: -14, scale: 1.05 }}
+          className="w-[128px] h-[168px] md:w-[148px] md:h-[196px] rounded-2xl overflow-hidden"
+          style={{ background: "#fff", boxShadow: "0 24px 50px -18px rgba(5,40,38,0.45), 0 0 0 1px rgba(255,255,255,0.5)" }}>
+          {c.body}
+        </motion.div>
+      </motion.div>
+    </div>
+  );
+}
+
+function LPHeroCards({ calm, sx, sy }: { calm: boolean; sx: MotionValue<number>; sy: MotionValue<number> }) {
+  const mid = (HERO_CARDS.length - 1) / 2;
+  const rotY = useTransform(sx, [0, 1], [-7, 7]);
+  const rotX = useTransform(sy, [0, 1], [5, -5]);
+  return (
+    <div className="relative mx-auto w-full overflow-hidden py-6" style={{ perspective: 1400 }}>
+      <motion.div className="flex items-end justify-center gap-3 md:gap-4 px-4 min-w-[860px] md:min-w-0"
+        style={calm ? undefined : { rotateY: rotY, rotateX: rotX, transformStyle: "preserve-3d" }}>
+        {HERO_CARDS.map((c, i) => (
+          <LPHeroCard key={c.key} c={c} i={i} mid={mid} sx={sx} sy={sy} calm={calm} />
+        ))}
+      </motion.div>
+    </div>
+  );
+}
+
+function Word({ children, delay, calm }: { children: ReactNode; delay: number; calm: boolean }) {
+  return (
+    <span className="inline-block overflow-hidden align-bottom pb-[0.12em] -mb-[0.12em]">
+      <motion.span className="inline-block"
+        initial={calm ? false : { y: "110%" }} animate={{ y: 0 }}
+        transition={{ duration: 0.8, delay, ease: [0.22, 1, 0.36, 1] }}>
+        {children}
+      </motion.span>
+    </span>
+  );
+}
+
+type LPStripItem = { Icon: LucideIcon; label: string; tone: string };
+const LP_STRIP: LPStripItem[] = [
+  { Icon: Receipt, label: "GST invoices", tone: "rgba(23,112,106,0.10)" },
+  { Icon: Calendar, label: "GSTR-1 & 3B", tone: "rgba(242,163,58,0.18)" },
+  { Icon: Wallet, label: "Payment reminders", tone: "rgba(23,112,106,0.10)" },
+  { Icon: Landmark, label: "Cash-flow alerts", tone: "rgba(23,112,106,0.10)" },
+  { Icon: FileSpreadsheet, label: "TDS dates", tone: "rgba(242,163,58,0.18)" },
+  { Icon: Truck, label: "e-Way bills", tone: "rgba(23,112,106,0.10)" },
+  { Icon: ClipboardList, label: "Task tracking", tone: "rgba(23,112,106,0.10)" },
+  { Icon: Users, label: "Customer ledgers", tone: "rgba(242,163,58,0.18)" },
+];
+
+function LPStripChip({ Icon, label, tone, calm }: LPStripItem & { calm: boolean }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <motion.div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      whileHover={{ y: -4, boxShadow: "0 14px 30px -14px rgba(16,24,40,0.22)" }}
+      whileTap={{ scale: 0.97 }}
+      transition={{ type: "spring", stiffness: 320, damping: 22 }}
+      className="flex items-center gap-2.5 pl-2 pr-5 py-2 rounded-full cursor-pointer whitespace-nowrap"
+      style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: "0 1px 2px rgba(16,24,40,0.03)" }}>
+      <span className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden" style={{ background: tone }}>
+        <motion.span animate={hover && !calm ? { rotate: 360 } : { rotate: 0 }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+          className="flex items-center justify-center">
+          <Icon size={15} strokeWidth={2.2} style={{ color: T.primary }} />
+        </motion.span>
+      </span>
+      <span className="text-sm font-medium" style={{ color: T.ink }}>{label}</span>
+    </motion.div>
+  );
+}
+
+function LPStrip({ calm }: { calm: boolean }) {
+  const items = [...LP_STRIP, ...LP_STRIP];
+  const [paused, setPaused] = useState(false);
+  return (
+    <div className="relative overflow-hidden py-10"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      style={{
+        maskImage: "linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent)",
+        WebkitMaskImage: "linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent)",
+      }}>
+      <div className="flex gap-3 w-max pr-3"
+        style={{
+          animation: calm ? "none" : "bizos-marquee 46s linear infinite",
+          animationPlayState: paused ? "paused" : "running",
+        }}>
+        {items.map((item, i) => <LPStripChip key={i} {...item} calm={calm} />)}
+      </div>
+    </div>
+  );
+}
+
+function HeadlineChip({ children, bg, color = "#fff" }: { children: ReactNode; bg: string; color?: string }) {
+  return (
+    <span className="inline-flex items-center justify-center align-middle w-[0.95em] h-[0.95em] rounded-full mx-1 text-[0.5em] -translate-y-[0.06em]"
+      style={{ background: bg, color }}>{children}</span>
+  );
+}
+
+const PROOF_STATS: { to: number; prefix?: string; suffix?: string; label: string; sub: string }[] = [
+  { to: 1247, label: "Actions logged", sub: "last 30 days" },
+  { to: 100, suffix: "%", label: "Verified", sub: "zero mismatches" },
+  { to: 120, prefix: "<", suffix: "ms", label: "Verify time", sub: "median response" },
+  { to: 8, label: "Data sources", sub: "bank · GST · Tally" },
+];
+
+function ProofSection({ calm }: { calm: boolean }) {
+  const [verified, setVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const doVerify = () => {
+    if (verifying || verified) return;
+    setVerifying(true);
+    setTimeout(() => { setVerifying(false); setVerified(true); }, 900);
+  };
+  return (
+    <section id="proof" className="relative max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+      <div className="grid md:grid-cols-2 gap-14 items-center">
+        <div>
+          <div className="inline-flex items-center gap-2 text-xs mb-6 font-medium" style={{ color: T.muted }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: T.primary }} />
+            Proof, not promises
+          </div>
+          <h2 className="font-display text-3xl md:text-5xl leading-tight mb-5">
+            Every action,<br />cryptographically proven.
+          </h2>
+          <p className="text-base md:text-lg leading-relaxed mb-8 max-w-md" style={{ color: T.muted }}>
+            When BizOS sends a reminder, files a return, or approves an action — it writes the source, rule, and approver to a verifiable ledger. Anyone can check. No one can tamper.
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-8 max-w-md">
+            {PROOF_STATS.map((s, i) => (
+              <SpotlightCard key={s.label} delay={i * 0.08}
+                className="rounded-2xl border p-4"
+                style={{ borderColor: T.border, background: T.surface }}>
+                <div className="text-2xl tabular-nums mb-1" style={{ color: T.ink, fontWeight: 700 }}>
+                  <CountUp to={s.to} prefix={s.prefix} suffix={s.suffix} calm={calm} />
+                </div>
+                <div className="text-xs font-medium" style={{ color: T.ink }}>{s.label}</div>
+                <div className="text-[10px] mt-0.5" style={{ color: T.muted }}>{s.sub}</div>
+              </SpotlightCard>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[{ Ic: FileText, t: "Source" }, { Ic: ShieldCheck, t: "Rule" }, { Ic: Users, t: "Approver" }].map(({ Ic, t }) => (
+              <span key={t} className="px-3 py-1.5 rounded-full text-xs border flex items-center gap-1.5"
+                style={{ borderColor: T.border, background: T.surface, color: T.muted }}>
+                <Ic size={11} /> {t}
+              </span>
+            ))}
+          </div>
+        </div>
+        <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }} transition={{ duration: 0.7 }}
+          className="max-w-md w-full mx-auto md:ml-auto relative">
+          <div className="absolute -inset-6 rounded-[40px] pointer-events-none" style={{ background: "rgba(23,112,106,0.10)", filter: "blur(50px)" }} />
+          <div className="relative rounded-3xl p-6"
+            style={{ background: T.surface, border: `1px solid ${T.border}`, boxShadow: "0 25px 60px -20px rgba(16,24,40,0.25)" }}>
+            <div className="flex items-center gap-3 mb-5 pb-4 border-b" style={{ borderColor: T.border }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: T.primarySoft }}>
+                <FileText size={18} color={T.primary} strokeWidth={2.2} />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold" style={{ color: T.ink }}>Evidence drawer</div>
+                <div className="text-[10px] uppercase tracking-wider" style={{ color: T.muted }}>INV-104 · Sharma Traders</div>
+              </div>
+              {verified && (
+                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
+                  className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: T.goodSoft }}>
+                  <Check size={13} color={T.good} strokeWidth={3} />
+                </motion.div>
+              )}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Source</div>
+                <div className="text-xs p-2.5 rounded-lg font-mono" style={{ background: "#F6F3EC", color: T.ink }}>
+                  tally.sync · invoice 104 · due 2026-09-05
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Rule</div>
+                <div className="text-xs p-2.5 rounded-lg" style={{ background: "#F6F3EC", color: T.ink }}>
+                  Overdue &gt; 30 days + top-5 customer → manager approval required
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: T.muted }}>Hash</div>
+                <div className="text-[10px] p-2.5 rounded-lg font-mono break-all" style={{ background: "#F6F3EC", color: T.muted }}>
+                  8f4a2b1c9e7d3f6a5b8c2e1d4f7a9b3c5e8d1f4a7b2c5e8d1f4a7b2c5e8d1f4a
+                </div>
+              </div>
+            </div>
+            <motion.button type="button"
+              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+              onClick={doVerify} disabled={verifying || verified}
+              className="w-full mt-5 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition"
+              style={{
+                background: verified ? T.goodSoft : T.primary,
+                color: verified ? T.good : "#fff",
+                cursor: verified ? "default" : "pointer",
+              }}>
+              {verifying ? <Loader2 size={14} className="animate-spin" />
+                : verified ? <Check size={14} strokeWidth={3} />
+                  : <ShieldCheck size={14} />}
+              {verifying ? "Recomputing hash…" : verified ? "Verified · matches" : "Verify this action"}
+            </motion.button>
+            <div className="text-[10px] text-center mt-2" style={{ color: T.muted }}>
+              Anyone with the link can verify — no login needed
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function Landing() {
+  const nav = useNavigate();
+  const calm = useCalm();
+  const px = useMotionValue(0.5);
+  const py = useMotionValue(0.5);
+  const sx = useSpring(px, { stiffness: 80, damping: 18, mass: 0.5 });
+  const sy = useSpring(py, { stiffness: 80, damping: 18, mass: 0.5 });
+  const gx = useTransform(sx, (v) => v * 100);
+  const gy = useTransform(sy, (v) => v * 100);
+  const spotlight = useMotionTemplate`radial-gradient(480px circle at ${gx}% ${gy}%, rgba(242,163,58,0.20), transparent 62%)`;
+
+  return (
+    <div className="min-h-screen relative overflow-x-hidden" style={{ background: T.canvas, color: T.ink }}>
+      <style>{`
+        @keyframes bizos-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @keyframes bizos-shimmer { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+      `}</style>
+      <ScrollBar />
+
+      {/* HERO */}
+      <section className="p-3 md:p-4">
+        <div className="relative rounded-[28px] md:rounded-[36px] overflow-hidden"
+          onPointerMove={(e) => {
+            if (calm) return;
+            const r = e.currentTarget.getBoundingClientRect();
+            px.set((e.clientX - r.left) / r.width);
+            py.set((e.clientY - r.top) / r.height);
+          }}
+          onPointerLeave={() => { px.set(0.5); py.set(0.5); }}
+          style={{ background: "linear-gradient(180deg, #FBF8F1 0%, #F6F3EC 55%, #EFEADC 100%)" }}>
+          <div className="absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full pointer-events-none"
+            style={{ background: "rgba(23,112,106,0.10)", filter: "blur(120px)" }} />
+          <div className="absolute -top-20 right-[-10%] w-[520px] h-[520px] rounded-full pointer-events-none"
+            style={{ background: "rgba(242,163,58,0.18)", filter: "blur(120px)" }} />
+          <HeroBackdrop calm={calm} tone="paper" />
+          {!calm && <motion.div aria-hidden className="absolute inset-0 pointer-events-none" style={{ background: spotlight }} />}
+          <LiveToast items={TOASTS_LEFT} startDelay={1800} calm={calm} className="left-6 top-[30%]" />
+          <LiveToast items={TOASTS_RIGHT} startDelay={3200} calm={calm} className="right-6 top-[40%]" />
+
+          <nav className="relative flex items-center justify-between px-5 md:px-10 py-5 md:py-6">
+            <div className="font-display text-2xl md:text-3xl tracking-tight" style={{ color: T.ink }}>
+              Biz<span style={{ color: T.primary }}>OS</span>
+            </div>
+            <div className="hidden md:flex items-center gap-9 text-sm" style={{ color: T.muted }}>
+              <a href="#proof" className="hover:opacity-70 transition">Proof</a>
+              <a href="#why" className="hover:opacity-70 transition">Why BizOS</a>
+              <a href="#chat" className="hover:opacity-70 transition">See it live</a>
+              <a href="#how" className="hover:opacity-70 transition">How it works</a>
+            </div>
+            <button type="button" onClick={() => nav("/login")}
+              className="text-sm px-5 py-2 rounded-full font-semibold transition hover:brightness-110"
+              style={{ background: T.ink, color: "#fff" }}>Sign in</button>
+          </nav>
+
+          <div className="relative text-center px-6 pt-12 md:pt-20 max-w-4xl mx-auto">
+            <motion.div initial={calm ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 mb-7 text-xs rounded-full font-medium backdrop-blur-sm"
+                style={{ background: "rgba(23,112,106,0.08)", border: "1px solid rgba(23,112,106,0.18)", color: T.primary }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: T.primary }} />
+                Built for Indian MSMEs
+              </div>
+            </motion.div>
+
+            <h1 className="font-display text-5xl md:text-7xl leading-[1.04] mb-6" style={{ color: T.ink }}>
+              <Word delay={0.10} calm={calm}>Run</Word>{" "}
+              <Word delay={0.18} calm={calm}>your</Word>{" "}
+              <Word delay={0.26} calm={calm}>business</Word>
+              <br />
+              <Word delay={0.34} calm={calm}>on</Word>{" "}
+              <span className="relative inline-block">
+                <Word delay={0.42} calm={calm}>
+                  <span style={{
+                    backgroundImage: `linear-gradient(100deg, ${T.primary} 0%, #35B7A9 25%, ${T.primary} 50%, #35B7A9 75%, ${T.primary} 100%)`,
+                    backgroundSize: "200% 100%", WebkitBackgroundClip: "text", backgroundClip: "text",
+                    color: "transparent", WebkitTextFillColor: "transparent",
+                    animation: calm ? "none" : "bizos-shimmer 5s linear infinite",
+                  }}>WhatsApp</span>
+                </Word>
+                <svg aria-hidden viewBox="0 0 220 14" preserveAspectRatio="none" fill="none"
+                  className="absolute left-0 -bottom-1 md:-bottom-2 w-full h-[0.2em] pointer-events-none">
+                  <motion.path d="M3 9 C 45 2, 90 12, 135 6 S 200 4, 217 8"
+                    stroke={T.accent} strokeWidth="4" strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                    initial={calm ? false : { pathLength: 0 }} animate={{ pathLength: 1 }}
+                    transition={{ duration: 0.9, delay: 1.1, ease: "easeOut" }} />
+                </svg>
+              </span>
+            </h1>
+
+            <motion.div initial={calm ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.55 }}>
+              <p className="text-base md:text-xl max-w-2xl mx-auto mb-9 leading-relaxed" style={{ color: T.muted }}>
+                One operating system for compliance, invoices, cash flow, and customers.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+                <Magnetic calm={calm} onClick={() => nav("/login")}
+                  className="pl-7 pr-2 py-2 rounded-full font-semibold"
+                  style={{ background: T.accent, color: T.ink, boxShadow: "0 14px 34px -12px rgba(242,163,58,0.65)" }}>
+                  Get started free
+                  <span className="w-9 h-9 rounded-full flex items-center justify-center text-white" style={{ background: T.ink }}>
+                    <ArrowUpRight size={16} strokeWidth={2.4} />
+                  </span>
+                </Magnetic>
+                <a href="#chat"
+                  className="px-7 py-3.5 rounded-full text-sm font-medium border backdrop-blur-sm transition hover:bg-white"
+                  style={{ borderColor: T.border, color: T.ink, background: "rgba(255,255,255,0.7)" }}>
+                  See it live
+                </a>
+              </div>
+              <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 mt-8 text-xs" style={{ color: T.muted }}>
+                {["Free for 3 users", "No credit card", "Setup in 2 minutes"].map((t) => (
+                  <span key={t} className="flex items-center gap-1.5">
+                    <Check size={12} style={{ color: T.good }} strokeWidth={3} />{t}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+
+          <div className="relative pt-10 md:pt-14 pb-10 md:pb-14">
+            <LPHeroCards calm={calm} sx={sx} sy={sy} />
+            <p className="text-center text-xs md:text-sm mt-8" style={{ color: T.muted }}>
+              Free to start · No new app — just WhatsApp
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <LPStrip calm={calm} />
+      <ProofSection calm={calm} />
+
+      {/* WHY */}
+      <section id="why" className="relative max-w-6xl mx-auto px-6 md:px-12 pt-16 md:pt-24 pb-10">
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center gap-2 text-xs mb-6 font-medium" style={{ color: T.muted }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: T.primary }} /> Why BizOS
+          </div>
+          <h2 className="font-display text-4xl md:text-6xl leading-[1.1] tracking-tight">
+            Your back-office, <HeadlineChip bg={T.primary}>₹</HeadlineChip> finally<br />
+            as simple as <HeadlineChip bg={T.accent} color={T.ink}>
+              <MessageCircle size={12} strokeWidth={2.5} />
+            </HeadlineChip> a chat
+            <span style={{ color: "#9AA4B2" }}> — no<br className="hidden md:block" /> software to learn.</span>
+          </h2>
+        </div>
+        <div className="grid md:grid-cols-12 gap-4 md:auto-rows-[minmax(0,1fr)]">
+          <SpotlightCard glow="rgba(255,255,255,0.14)"
+            className="md:col-span-5 md:row-span-2 rounded-[28px] p-6 min-h-[380px] flex flex-col justify-between text-white"
+            style={{ background: "linear-gradient(170deg, #17706A 0%, #0B4F4A 100%)" }}>
+            <div className="flex items-center justify-between">
+              <div className="font-display text-xl">Biz<span style={{ color: T.accent }}>OS</span></div>
+              <div className="w-9 h-9 rounded-xl bg-white/90 flex items-center justify-center">
+                <BarChart3 size={16} style={{ color: T.primary }} strokeWidth={2.2} />
+              </div>
+            </div>
+            <div className="absolute -bottom-20 -right-16 w-72 h-72 rounded-full pointer-events-none"
+              style={{ background: "rgba(242,163,58,0.25)", filter: "blur(70px)" }} />
+            <div className="relative rounded-2xl p-5" style={{ background: "#fff", color: T.ink }}>
+              <div className="font-display text-5xl leading-none">1 chat</div>
+              <p className="text-sm mt-3 leading-relaxed" style={{ color: T.muted }}>
+                Invoices, dues, filings and follow-ups — all handled in the WhatsApp app you already use every day.
+              </p>
+            </div>
+          </SpotlightCard>
+          <SpotlightCard className="md:col-span-4 rounded-[28px] p-6 flex flex-col justify-between min-h-[180px]" style={{ background: "#F1F3F2" }}>
+            <div className="text-sm" style={{ color: T.muted }}>Setup time</div>
+            <div>
+              <div className="font-display text-5xl">~2 min</div>
+              <p className="text-sm mt-2" style={{ color: T.muted }}>Sign in, open the bot, send your first invoice photo.</p>
+            </div>
+          </SpotlightCard>
+          <SpotlightCard glow="rgba(255,255,255,0.4)"
+            className="md:col-span-3 rounded-[28px] p-6 flex flex-col justify-between min-h-[180px]"
+            style={{ background: T.accent, color: T.ink }}>
+            <div className="text-sm font-medium">Every morning</div>
+            <div>
+              <div className="font-display text-4xl tabular-nums">7:00 AM</div>
+              <p className="text-sm mt-2 font-medium opacity-80">Your daily brief: dues, tasks, deadlines.</p>
+            </div>
+          </SpotlightCard>
+          <SpotlightCard glow="rgba(242,163,58,0.22)"
+            className="md:col-span-3 rounded-[28px] p-6 flex items-center justify-between min-h-[110px] text-white"
+            style={{ background: T.ink }}>
+            <span className="text-sm text-white/70">Deadlines watched</span>
+            <span className="font-display text-4xl tabular-nums">24/7</span>
+          </SpotlightCard>
+          <SpotlightCard className="md:col-span-4 rounded-[28px] p-6 flex items-center gap-4 min-h-[110px] border"
+            style={{ background: T.surface, borderColor: T.border }}>
+            <div className="flex -space-x-2">
+              {[Receipt, Calendar, Wallet].map((Ic, i) => (
+                <span key={i} className="w-10 h-10 rounded-full flex items-center justify-center border-2 border-white"
+                  style={{ background: i === 1 ? "rgba(242,163,58,0.25)" : "rgba(23,112,106,0.15)" }}>
+                  <Ic size={16} style={{ color: T.primary }} strokeWidth={2.2} />
+                </span>
+              ))}
+            </div>
+            <p className="text-sm leading-snug" style={{ color: T.muted }}>
+              Compliance, invoices and cash flow in one place — not three apps and a spreadsheet.
+            </p>
+          </SpotlightCard>
+        </div>
+      </section>
+
+      {/* LIVE CHAT */}
+      <section id="chat" className="relative max-w-6xl mx-auto px-6 md:px-12 py-20 md:py-28">
+        <div className="grid md:grid-cols-2 gap-14 items-center">
+          <div>
+            <h2 className="font-display text-3xl md:text-5xl leading-tight mb-5">
+              Just ask. <br />Your business answers.
+            </h2>
+            <p className="text-base md:text-lg leading-relaxed mb-8 max-w-md" style={{ color: T.muted }}>
+              No dashboards to dig through. Type what you'd ask your accountant — BizOS replies on WhatsApp with real numbers from your own books.
+            </p>
+            <div className="flex flex-wrap gap-2.5">
+              {["Who owes me money?", "What's due this week?", "Remind Zenith Tech", "Show cash flow"].map((q) => (
+                <motion.span key={q} whileHover={{ y: -3 }}
+                  className="px-4 py-2 rounded-full text-sm border bg-white cursor-default"
+                  style={{ borderColor: T.border }}>{q}</motion.span>
+              ))}
+            </div>
+          </div>
+          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.7 }}
+            className="max-w-sm w-full mx-auto md:ml-auto relative">
+            <div className="absolute -inset-6 rounded-[40px] pointer-events-none"
+              style={{ background: "rgba(37,211,102,0.15)", filter: "blur(50px)" }} />
+            <div className="relative rounded-3xl p-6 text-left"
+              style={{ background: WA.dark, boxShadow: "0 25px 60px -20px rgba(37,211,102,0.4)" }}>
+              <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-white"
+                  style={{ background: WA.green }}>BD</div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-white">BizOS Bot</div>
+                  <div className="text-xs" style={{ color: WA.green }}>online</div>
+                </div>
+              </div>
+              <div className="text-xs mb-3 text-center" style={{ color: WA.textMuted }}>Today</div>
+              <div className="rounded-2xl rounded-tl-sm p-4 mb-3" style={{ background: WA.bubbleIn }}>
+                <p className="text-sm font-medium mb-2" style={{ color: WA.text }}>Good morning.</p>
+                <p className="text-xs leading-relaxed" style={{ color: WA.text, opacity: 0.9 }}>
+                  <span style={{ color: T.critical, fontWeight: 700 }}>•</span> <b>5 invoices overdue</b> · ₹12.6L<br />
+                  <span style={{ color: T.accent, fontWeight: 700 }}>•</span> 8 open tasks<br />
+                  <span style={{ color: T.primary, fontWeight: 700 }}>•</span> GSTR-3B due in 3 days
+                </p>
+              </div>
+              <div className="rounded-2xl rounded-tr-sm p-3 ml-auto max-w-[80%]" style={{ background: WA.bubbleOut }}>
+                <p className="text-xs" style={{ color: WA.text }}>who owes me money?</p>
+                <div className="text-[10px] mt-1 text-right flex items-center justify-end gap-1" style={{ color: WA.textMuted }}>
+                  7:01 AM <span style={{ color: WA.tick }}>✓✓</span>
+                </div>
+              </div>
+              <div className="rounded-2xl rounded-tl-sm p-4 mt-3" style={{ background: WA.bubbleIn }}>
+                <p className="text-xs leading-relaxed" style={{ color: WA.text, opacity: 0.9 }}>
+                  INV-104 — Sharma Traders — ₹4.2L — 35d<br />
+                  INV-105 — Zenith Tech — ₹2.85L — 28d<br />
+                  INV-106 — Patel Precision — ₹1.78L — 22d
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* HOW */}
+      <section id="how" className="relative max-w-6xl mx-auto px-6 md:px-12 pb-24 md:pb-32">
+        <div className="text-center mb-14">
+          <h2 className="font-display text-3xl md:text-5xl">Built for how Indian businesses actually run</h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-5 relative">
+          <div className="hidden md:block absolute top-[58px] left-[16%] right-[16%] h-px"
+            style={{ background: `repeating-linear-gradient(90deg, ${T.primary}55 0 6px, transparent 6px 12px)` }} />
+          {[
+            { num: "1", title: "Snap an invoice", desc: "Send a photo on WhatsApp. We read it, log it, and track the payment.", Icon: Camera, tint: "rgba(23,112,106,0.12)" },
+            { num: "2", title: "Ask anything", desc: '"Who owes me money?" "What\'s due this week?" — get real answers.', Icon: MessageCircle, tint: "rgba(242,163,58,0.2)" },
+            { num: "3", title: "Auto-pilot", desc: "Reminders, compliance deadlines, cash-flow alerts. Handled automatically.", Icon: Zap, tint: "rgba(23,112,106,0.12)" },
+          ].map((f, i) => (
+            <SpotlightCard key={f.num} delay={i * 0.1}
+              className="p-8 rounded-[28px] border"
+              style={{ borderColor: T.border, background: T.surface }}>
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6 relative" style={{ background: f.tint }}>
+                <f.Icon size={22} style={{ color: T.primary }} strokeWidth={2.2} />
+                <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full text-xs font-semibold flex items-center justify-center text-white"
+                  style={{ background: T.primary }}>{f.num}</span>
+              </div>
+              <h3 className="font-display text-xl mb-2">{f.title}</h3>
+              <p className="text-sm leading-relaxed" style={{ color: T.muted }}>{f.desc}</p>
+            </SpotlightCard>
+          ))}
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="px-3 md:px-4 pb-4">
+        <div className="relative rounded-[28px] md:rounded-[36px] overflow-hidden text-center px-6 py-20 md:py-28"
+          style={{ background: "linear-gradient(180deg, #17706A 0%, #0B4F4A 100%)" }}>
+          <HeroBackdrop calm={calm} tone="dark" />
+          <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-[560px] h-[360px] rounded-full pointer-events-none"
+            style={{ background: "rgba(242,163,58,0.28)", filter: "blur(110px)" }} />
+          <div className="relative">
+            <h2 className="font-display text-4xl md:text-6xl text-white leading-tight mb-4">
+              Run your business<br />on <span style={{ color: T.accent }}>WhatsApp</span>
+            </h2>
+            <p className="text-white/80 mb-9 max-w-md mx-auto">
+              Ready to get your business in order? Start free — it takes two minutes.
+            </p>
+            <Magnetic calm={calm} onClick={() => nav("/login")}
+              className="pl-8 pr-2 py-2 rounded-full font-semibold"
+              style={{ background: T.accent, color: T.ink }}>
+              Start free
+              <span className="w-9 h-9 rounded-full flex items-center justify-center text-white" style={{ background: T.ink }}>
+                <ArrowUpRight size={16} strokeWidth={2.4} />
+              </span>
+            </Magnetic>
+          </div>
+        </div>
+      </section>
+
+      <footer className="py-10 text-center text-xs" style={{ color: T.muted }}>
+        <div className="flex justify-center gap-6 mb-4">
+          <a href="#" className="hover:opacity-70 transition">Terms</a>
+          <a href="#" className="hover:opacity-70 transition">Privacy</a>
+          <a href="#" className="hover:opacity-70 transition">Help</a>
+        </div>
+        <div>BizOS · Built in India · © 2026</div>
+      </footer>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // [13] LOGIN
 // ═══════════════════════════════════════════════════════════════════
 const DEMO_CODE = "123456";
@@ -2602,6 +3559,7 @@ function Onboarding({ onDone }: { onDone: (name: string, city: string) => void }
 const NAV = [
   { to: "/", label: "Home", Icon: HomeIcon },
   { to: "/inbox", label: "Inbox", Icon: InboxIcon, badgeKey: "inbox" as const },
+  { to: "/money", label: "Money", Icon: IndianRupee },
   { to: "/invoices", label: "Invoices", Icon: Receipt },
   { to: "/customers", label: "Customers", Icon: Users },
   { to: "/tasks", label: "Work", Icon: CheckSquare },
