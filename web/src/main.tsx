@@ -49,7 +49,7 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  BrowserRouter, Routes, Route, NavLink, useNavigate, Navigate, useParams,
+  HashRouter, Routes, Route, NavLink, useNavigate, Navigate, useParams,
 } from "react-router-dom";
 import {
   motion, AnimatePresence, useReducedMotion, useMotionValue, animate,
@@ -7697,7 +7697,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!authed) return <Navigate to="/login" replace />;
+  if (!authed) return <Landing />;
   return <>{children}</>;
 }
 
@@ -8148,7 +8148,7 @@ function ApprovalProvider({ children }: { children: ReactNode }) {
 function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <HashRouter>
         <ApprovalProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -8160,7 +8160,7 @@ function App() {
             toastOptions={{ style: { background: T.surface, color: T.ink,
               border: `1px solid ${T.border}`, fontSize: 13, borderRadius: 12 } }} />
         </ApprovalProvider>
-      </BrowserRouter>
+      </HashRouter>
     </ErrorBoundary>
   );
 }
