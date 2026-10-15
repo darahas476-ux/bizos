@@ -5,7 +5,7 @@
 **A business-centric operating system for Indian MSMEs.**
 One connected view of your business, with people in control of every important decision.
 
-[Live Demo](https://darahas476-ux.github.io/bizos/) · [Source Code](https://github.com/darahas476-ux/bizos)
+[Live Demo](https://darahas476-ux.github.io/bizos/) · 
 
 <!-- Add a screenshot: <img src="assets/screenshots/bizos-home.png" alt="BizOS preview" width="900"> -->
 
@@ -90,9 +90,7 @@ Built collaboratively during a hackathon. Contributions overlapped across the te
 | **Darahas Thandra** | Full-stack developer | Led website implementation across frontend and backend using React, TypeScript, Three.js, Rust, and Python |
 | **T. Vishwagnaya** | Project orchestration and development | Coordinated the team and played a key role in building the project and moving the work forward |
 | **Ashraf** | Media and marketing | Created the product demo video and supported media and marketing presentation |
-| **Abhijit** | presentation | Contributed to the project presentation |
-
-<!-- Link each name to their GitHub/LinkedIn, e.g. [Darahas Thandra](https://github.com/darahas476-ux) -->
+| **[Abhijit](https://github.com/KAbhijith008-byte)** | UI/UX and presentation | Contributed to frontend UI, X (Twitter) design and content, and the project presentation |
 
 ## License
 
