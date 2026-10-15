@@ -83,12 +83,16 @@ npm run dev
 
 ## Team
 
-| Name | Role |
-|---|---|
-| **Darahas Thandra** | Full-stack development (React, TypeScript, Three.js, Rust, Python) |
-| **T. Vishwagnaya** | Project coordination and development |
-| **Ashraf** | Demo video, media, and marketing |
-| **Abhijit** | UI/UX, social content, and presentation |
+Built collaboratively during a hackathon. Contributions overlapped across the team.
+
+| Name | Role | Contribution |
+|---|---|---|
+| **Darahas Thandra** | Full-stack developer | Led website implementation across frontend and backend using React, TypeScript, Three.js, Rust, and Python |
+| **T. Vishwagnaya** | Project orchestration and development | Coordinated the team and played a key role in building the project and moving the work forward |
+| **Ashraf** | Media and marketing | Created the product demo video and supported media and marketing presentation |
+| **Abhijit** | presentation | Contributed to frontend UI, X (Twitter) design and content, and the project presentation |
+
+<!-- Link each name to their GitHub/LinkedIn, e.g. [Darahas Thandra](https://github.com/darahas476-ux) -->
 
 ## License
 
